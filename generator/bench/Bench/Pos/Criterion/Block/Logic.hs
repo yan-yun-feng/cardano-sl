@@ -43,6 +43,7 @@ import           Pos.Lrc.Context (lrcActionOnEpochReason)
 import qualified Pos.Lrc.DB as LrcDB
 import           Pos.Txp.Logic.Global (txpGlobalSettings)
 import           Pos.Util.CompileInfo (withCompileInfo)
+
 import           Test.Pos.Block.Logic.Emulation (runEmulation, sudoLiftIO)
 import           Test.Pos.Block.Logic.Mode (BlockTestContext, BlockTestMode,
                      TestParams (..), initBlockTestContext, runBlockTestMode)
@@ -124,9 +125,7 @@ verifyBlocksBenchmark !pm !tp !ctx =
                     })
                 (maybeToList . fmap fst)
         let curSlot :: Maybe SlotId
-            curSlot = case catMaybes
-                . map (either (const Nothing) Just . unEpochOrSlot . getEpochOrSlot)
-                $ bs of
+            curSlot = case mapMaybe (either (const Nothing) Just . unEpochOrSlot . getEpochOrSlot) bs of
                 [] -> Nothing
                 ss -> Just $ maximum ss
         vctx <- getVerifyBlocksContext' curSlot
