@@ -52,13 +52,13 @@ data TxpGlobalSettings = TxpGlobalSettings
       -- First argument determines whether it should be checked that
       -- all data from transactions is known (script versions,
       -- attributes, addresses, witnesses).
-      tgsVerifyBlocks :: forall m. TxpGlobalVerifyMode m =>
+      tgsVerifyBlocks :: forall m. (MonadIO m, TxpGlobalVerifyMode m) =>
                          TraceNamed m -> Bool -> OldestFirst NE TxpBlock ->
                          m $ Either ToilVerFailure $ OldestFirst NE TxpUndo
     , -- | Apply chain of /definitely/ valid blocks to Txp's GState.
-      tgsApplyBlocks :: forall ctx m . TxpGlobalApplyMode ctx m =>
+      tgsApplyBlocks :: forall ctx m . (MonadIO m, TxpGlobalApplyMode ctx m) =>
                         TraceNamed m -> OldestFirst NE TxpBlund -> m SomeBatchOp
     , -- | Rollback chain of blocks.
-      tgsRollbackBlocks :: forall m . TxpGlobalRollbackMode m =>
-                           TraceNamed m ->NewestFirst NE TxpBlund -> m SomeBatchOp
+      tgsRollbackBlocks :: forall m . (MonadIO m, TxpGlobalRollbackMode m) =>
+                           TraceNamed m -> NewestFirst NE TxpBlund -> m SomeBatchOp
     }

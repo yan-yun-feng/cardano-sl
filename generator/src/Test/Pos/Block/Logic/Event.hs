@@ -91,7 +91,7 @@ runBlockEvent (BlkEvApply ev) =
         BlockApplyFailure -> BlockEventFailure (IsExpected True) e
 
 runBlockEvent (BlkEvRollback ev) =
-    (onSuccess <$ rollbackBlocks dummyProtocolMagic (ev ^. berInput))
+    (onSuccess <$ rollbackBlocks noTrace dummyProtocolMagic (ev ^. berInput))
        `catch` (return . onFailure)
   where
     onSuccess = case ev ^. berOutValid of

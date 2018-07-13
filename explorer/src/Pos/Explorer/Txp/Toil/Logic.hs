@@ -17,7 +17,6 @@ import qualified Data.HashSet as HS
 import           Data.List (delete)
 import qualified Data.List.NonEmpty as NE
 import           Formatting (build, sformat, (%))
-import           System.Wlog (logError)
 
 import           Pos.Core (Address, BlockVersionData, Coin, EpochIndex,
                      HasConfiguration, HeaderHash, Timestamp, mkCoin, sumCoins,
@@ -37,6 +36,8 @@ import           Pos.Txp.Toil (ToilVerFailure (..), extendGlobalToilM,
                      extendLocalToilM)
 import qualified Pos.Txp.Toil as Txp
 import           Pos.Txp.Topsort (topsortTxs)
+import           Pos.Util.Trace (noTrace)
+import           Pos.Util.Trace.Named (TraceNamed, logError)
 import           Pos.Util.Util (Sign (..))
 
 ----------------------------------------------------------------------------
@@ -45,13 +46,14 @@ import           Pos.Util.Util (Sign (..))
 
 -- | Apply transactions from one block. They must be valid (for
 -- example, it implies topological sort).
-eApplyToil ::
-       HasConfiguration
-    => Maybe Timestamp
+eApplyToil
+    :: HasConfiguration
+    => TraceNamed m
+    -> Maybe Timestamp
     -> [(TxAux, TxUndo)]
     -> HeaderHash
     -> EGlobalToilM ()
-eApplyToil mTxTimestamp txun hh = do
+eApplyToil logTrace mTxTimestamp txun hh = do
     extendGlobalToilM $ Txp.applyToil txun
     explorerExtraMToEGlobalToilM $ mapM_ applier $ zip [0..] txun
   where
@@ -63,12 +65,16 @@ eApplyToil mTxTimestamp txun hh = do
         extra <- fromMaybe newExtra <$> getTxExtra id
         putTxExtraWithHistory id extra $ getTxRelatedAddrs txAux txUndo
         let balanceUpdate = getBalanceUpdate txAux txUndo
-        updateAddrBalances balanceUpdate
+        updateAddrBalances logTrace balanceUpdate
         updateUtxoSumFromBalanceUpdate balanceUpdate
 
 -- | Rollback transactions from one block.
-eRollbackToil :: HasConfiguration => [(TxAux, TxUndo)] -> EGlobalToilM ()
-eRollbackToil txun = do
+eRollbackToil
+    :: HasConfiguration
+    => TraceNamed m
+    -> [(TxAux, TxUndo)]
+    -> EGlobalToilM ()
+eRollbackToil logTrace txun = do
     extendGlobalToilM $ Txp.rollbackToil txun
     explorerExtraMToEGlobalToilM $ mapM_ extraRollback $ reverse txun
   where
@@ -81,7 +87,7 @@ eRollbackToil txun = do
             plusBalance = minusBalance,
             minusBalance = plusBalance
         }
-        updateAddrBalances balanceUpdate
+        updateAddrBalances logTrace balanceUpdate
         updateUtxoSumFromBalanceUpdate balanceUpdate
 
 ----------------------------------------------------------------------------
@@ -92,35 +98,37 @@ eRollbackToil txun = do
 -- if transaction is valid.
 eProcessTx
     :: HasTxpConfiguration
-    => ProtocolMagic
+    => TraceNamed m
+    -> ProtocolMagic
     -> BlockVersionData
     -> EpochIndex
     -> (TxId, TxAux)
     -> (TxUndo -> TxExtra)
     -> ExceptT ToilVerFailure ELocalToilM ()
-eProcessTx pm bvd curEpoch tx@(id, aux) createExtra = do
+eProcessTx logTrace pm bvd curEpoch tx@(id, aux) createExtra = do
     undo <- mapExceptT extendLocalToilM $ Txp.processTx pm bvd mempty curEpoch tx
     lift $ explorerExtraMToELocalToilM $ do
         let extra = createExtra undo
         putTxExtraWithHistory id extra $ getTxRelatedAddrs aux undo
         let balanceUpdate = getBalanceUpdate aux undo
-        updateAddrBalances balanceUpdate
+        updateAddrBalances logTrace balanceUpdate
         updateUtxoSumFromBalanceUpdate balanceUpdate
 
 -- | Get rid of invalid transactions.
 -- All valid transactions will be added to mem pool and applied to utxo.
 eNormalizeToil
     :: HasTxpConfiguration
-    => ProtocolMagic
+    => TraceNamed m
+    -> ProtocolMagic
     -> BlockVersionData
     -> EpochIndex
     -> [(TxId, (TxAux, TxExtra))]
     -> ELocalToilM ()
-eNormalizeToil pm bvd curEpoch txs = mapM_ normalize ordered
+eNormalizeToil logTrace pm bvd curEpoch txs = mapM_ normalize ordered
   where
     ordered = fromMaybe txs $ topsortTxs wHash txs
     wHash (i, (txAux, _)) = WithHash (taTx txAux) i
-    normalize = runExceptT . uncurry (eProcessTx pm bvd curEpoch) . repair
+    normalize = runExceptT . uncurry (eProcessTx logTrace pm bvd curEpoch) . repair
     repair (i, (txAux, extra)) = ((i, txAux), const extra)
 
 ----------------------------------------------------------------------------
@@ -192,8 +200,11 @@ combineBalanceUpdates BalanceUpdate {..} =
     reducer (Nothing, Just minus) | minus /= mkCoin 0 = Just (Minus, minus)
     reducer _ = Nothing
 
-updateAddrBalances :: BalanceUpdate -> ExplorerExtraM ()
-updateAddrBalances (combineBalanceUpdates -> updates) = mapM_ updater updates
+updateAddrBalances
+    :: TraceNamed m
+    -> BalanceUpdate
+    -> ExplorerExtraM ()
+updateAddrBalances _ (combineBalanceUpdates -> updates) = mapM_ updater updates
   where
     updater :: (Address, (Sign, Coin)) -> ExplorerExtraM ()
     updater (addr, (Plus, coin)) = do
@@ -204,13 +215,13 @@ updateAddrBalances (combineBalanceUpdates -> updates) = mapM_ updater updates
         maybeBalance <- getAddrBalance addr
         case maybeBalance of
             Nothing ->
-                logError $
+                logError noTrace $
                     sformat ("updateAddrBalances: attempted to subtract "%build%
                              " from unknown address "%build)
                     coin addr
             Just currentBalance
                 | currentBalance < coin ->
-                    logError $
+                    lift $ logError noTrace $
                         sformat ("updateAddrBalances: attempted to subtract "%build%
                                  " from address "%build%" which only has "%build)
                         coin addr currentBalance

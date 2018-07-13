@@ -38,7 +38,6 @@ import           Network.EngineIO (SocketId)
 import           Network.SocketIO (Socket)
 
 import           Serokell.Util.Concurrent (modifyTVarS)
-import           System.Wlog (NamedPureLogger, WithLogger, launchNamedPureLog)
 
 import           Pos.Core (Address)
 
@@ -89,11 +88,11 @@ mkConnectionsState =
     }
 
 withConnState
-    :: (MonadIO m, WithLogger m)
+    :: MonadIO m
     => ConnectionsVar
-    -> NamedPureLogger (StateT ConnectionsState STM) a
+    -> {-NamedPureLogger-} (StateT ConnectionsState STM) a
     -> m a
-withConnState var = launchNamedPureLog $ atomically . modifyTVarS var
+withConnState var = {-launchNamedPureLog $-} atomically . modifyTVarS var
 
 askingConnState
     :: MonadIO m

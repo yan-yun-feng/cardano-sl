@@ -20,6 +20,8 @@ import           Pos.Txp (ProcessBlundsSettings (..), TxpBlund,
                      TxpGlobalSettings (..), applyBlocksWith, blundToAuxNUndo,
                      processBlunds, txpGlobalSettings)
 import qualified Pos.Util.Modifier as MM
+import           Pos.Util.Trace (noTrace)
+import           Pos.Util.Trace.Named (TraceNamed)
 
 import qualified Pos.Explorer.DB as GS
 import           Pos.Explorer.Txp.Common (buildExplorerExtraLookup)
@@ -27,31 +29,38 @@ import           Pos.Explorer.Txp.Toil (EGlobalToilM, ExplorerExtraLookup (..),
                      ExplorerExtraModifier (..), eApplyToil, eRollbackToil)
 
 -- | Settings used for global transactions data processing used by explorer.
-explorerTxpGlobalSettings :: HasConfiguration => ProtocolMagic -> TxpGlobalSettings
-explorerTxpGlobalSettings pm =
+explorerTxpGlobalSettings
+    :: (MonadIO m, HasConfiguration)
+    => TraceNamed m
+    -> ProtocolMagic
+    -> TxpGlobalSettings
+explorerTxpGlobalSettings logTrace pm =
     -- verification is same
     (txpGlobalSettings pm)
-    { tgsApplyBlocks = applyBlocksWith pm applySettings
-    , tgsRollbackBlocks = processBlunds rollbackSettings . getNewestFirst
+    { tgsApplyBlocks = \tr -> applyBlocksWith tr pm (applySettings tr)
+    --TODO applySettings could take the Trace inside applyBlocksWith
+    , tgsRollbackBlocks = \tr -> processBlunds (rollbackSettings tr) . getNewestFirst
     }
 
 applySettings ::
-       (TxpGlobalApplyMode ctx m)
-    => ProcessBlundsSettings ExplorerExtraLookup ExplorerExtraModifier m
-applySettings =
+       (MonadIO m, TxpGlobalApplyMode ctx m)
+    => TraceNamed m
+    -> ProcessBlundsSettings ExplorerExtraLookup ExplorerExtraModifier m
+applySettings logTrace =
     ProcessBlundsSettings
-        { pbsProcessSingle = applySingle
+        { pbsProcessSingle = applySingle logTrace
         , pbsCreateEnv = buildExplorerExtraLookup
         , pbsExtraOperations = extraOps
         , pbsIsRollback = False
         }
 
 rollbackSettings ::
-       (TxpGlobalRollbackMode m)
-    => ProcessBlundsSettings ExplorerExtraLookup ExplorerExtraModifier m
-rollbackSettings =
+       (MonadIO m, TxpGlobalRollbackMode m)
+    => TraceNamed m
+    -> ProcessBlundsSettings ExplorerExtraLookup ExplorerExtraModifier m
+rollbackSettings logTrace =
     ProcessBlundsSettings
-        { pbsProcessSingle = return . eRollbackToil . blundToAuxNUndo
+        { pbsProcessSingle = return . (eRollbackToil noTrace) . blundToAuxNUndo
         , pbsCreateEnv = buildExplorerExtraLookup
         , pbsExtraOperations = extraOps
         , pbsIsRollback = True
@@ -59,8 +68,10 @@ rollbackSettings =
 
 applySingle ::
        forall ctx m. (HasConfiguration, TxpGlobalApplyMode ctx m)
-    => TxpBlund -> m (EGlobalToilM ())
-applySingle txpBlund = do
+    => TraceNamed m
+    -> TxpBlund
+    -> m (EGlobalToilM ())
+applySingle logTrace txpBlund = do
     -- @TxpBlund@ is a block/blund with a reduced set of information required for
     -- transaction processing. We use it to determine at which slot did a transaction
     -- occur. TxpBlund has TxpBlock inside. If it's Left, it's a genesis block which
@@ -83,7 +94,7 @@ applySingle txpBlund = do
     mTxTimestamp <- getSlotStart slotId
 
     let (txAuxesAndUndos, hHash) = blundToAuxNUndoWHash txpBlund
-    return $ eApplyToil mTxTimestamp txAuxesAndUndos hHash
+    return $ eApplyToil logTrace mTxTimestamp txAuxesAndUndos hHash
 
 extraOps :: HasConfiguration => ExplorerExtraModifier -> SomeBatchOp
 extraOps (ExplorerExtraModifier em (HM.toList -> histories) balances utxoNewSum) =

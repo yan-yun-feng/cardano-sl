@@ -8,7 +8,7 @@ module Pos.Explorer.Txp.Local
        , eTxNormalize
        ) where
 
-import           JsonLog (CanJsonLog (..))
+-- import           JsonLog (CanJsonLog (..))
 import           Universum
 
 import qualified Data.HashMap.Strict as HM
@@ -26,6 +26,8 @@ import           Pos.Txp.MemState (MempoolExt, TxpLocalWorkMode, getTxpExtra,
                      withTxpLocalData)
 import           Pos.Txp.Toil (ToilVerFailure (..), Utxo)
 import qualified Pos.Util.Modifier as MM
+import           Pos.Util.Trace (noTrace)
+import           Pos.Util.Trace.Named (TraceNamed)
 import           Pos.Util.Util (HasLens')
 
 import           Pos.Explorer.Core (TxExtra (..))
@@ -44,26 +46,29 @@ eTxProcessTransaction ::
        ( ETxpLocalWorkMode ctx m
        , HasLens' ctx StateLock
        , HasLens' ctx (StateLockMetrics MemPoolModifyReason)
-       , CanJsonLog m
+    --    , CanJsonLog m
        )
-    => ProtocolMagic
+    => TraceNamed m
+    -> ProtocolMagic
     -> (TxId, TxAux)
     -> m (Either ToilVerFailure ())
-eTxProcessTransaction pm itw =
-    withStateLock LowPriority ProcessTransaction $ \__tip -> eTxProcessTransactionNoLock pm itw
+eTxProcessTransaction logTrace pm itw =
+    withStateLock noTrace LowPriority ProcessTransaction $
+        \__tip -> eTxProcessTransactionNoLock logTrace pm itw
 
 eTxProcessTransactionNoLock ::
-       forall ctx m. (ETxpLocalWorkMode ctx m)
-    => ProtocolMagic
+       forall ctx m. (MonadIO m, ETxpLocalWorkMode ctx m)
+    => TraceNamed m
+    -> ProtocolMagic
     -> (TxId, TxAux)
     -> m (Either ToilVerFailure ())
-eTxProcessTransactionNoLock pm itw = getCurrentSlot >>= \case
+eTxProcessTransactionNoLock logTrace pm itw = getCurrentSlot >>= \case
     Nothing   -> pure $ Left ToilSlotUnknown
     Just slot -> do
         -- First get the current @SlotId@ so we can calculate the time.
         -- Then get when that @SlotId@ started and use that as a time for @Tx@.
         mTxTimestamp <- getSlotStart slot
-        txProcessTransactionAbstract buildContext (processTx' mTxTimestamp) itw
+        txProcessTransactionAbstract logTrace buildContext (processTx' mTxTimestamp) itw
   where
     buildContext :: Utxo -> TxAux -> m ExplorerExtraLookup
     buildContext utxo = buildExplorerExtraLookup utxo . one
@@ -75,14 +80,17 @@ eTxProcessTransactionNoLock pm itw = getCurrentSlot >>= \case
         -> (TxId, TxAux)
         -> ExceptT ToilVerFailure ELocalToilM ()
     processTx' mTxTimestamp bvd epoch tx =
-        eProcessTx pm bvd epoch tx (TxExtra Nothing mTxTimestamp)
+        eProcessTx logTrace pm bvd epoch tx (TxExtra Nothing mTxTimestamp)
 
 -- | 1. Recompute UtxoView by current MemPool
 --   2. Remove invalid transactions from MemPool
 --   3. Set new tip to txp local data
 eTxNormalize
-    :: forall ctx m . (ETxpLocalWorkMode ctx m) => ProtocolMagic -> m ()
-eTxNormalize pm = do
+    :: forall ctx m . (ETxpLocalWorkMode ctx m)
+    => TraceNamed m
+    -> ProtocolMagic
+    -> m ()
+eTxNormalize logTrace pm = do
     extras <- MM.insertionsMap . view eemLocalTxsExtra <$> withTxpLocalData getTxpExtra
     txNormalizeAbstract buildExplorerExtraLookup (normalizeToil' extras)
   where
@@ -94,4 +102,4 @@ eTxNormalize pm = do
         -> ELocalToilM ()
     normalizeToil' extras bvd epoch txs =
         let toNormalize = HM.toList $ HM.intersectionWith (,) txs extras
-        in eNormalizeToil pm bvd epoch toNormalize
+        in eNormalizeToil logTrace pm bvd epoch toNormalize
