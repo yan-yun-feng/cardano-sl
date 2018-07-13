@@ -158,6 +158,6 @@ genBlock logTrace0 pm eos = do
             Right (undos, pollModifier) -> do
                 let undo = undos ^. _Wrapped . _neHead
                     blund = (block, undo)
-                applyBlocksUnsafe pm (ShouldCallBListener True) (one blund) (Just pollModifier)
+                applyBlocksUnsafe logTrace pm (ShouldCallBListener True) (one blund) (Just pollModifier)
                 normalizeMempool logTrace pm
                 pure blund

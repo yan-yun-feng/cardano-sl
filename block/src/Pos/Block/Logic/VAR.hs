@@ -183,7 +183,8 @@ verifyAndApplyBlocks logTrace0 pm rollback blocks = runExceptT $ do
             Left (ApplyBlocksVerifyFailure -> e') ->
                 applyAMAP e' (OldestFirst []) blunds nothingApplied
             Right (OldestFirst (undo :| []), pModifier) -> do
-                lift $ applyBlocksUnsafe pm (ShouldCallBListener True) (one (block, undo)) (Just pModifier)
+                lift $ applyBlocksUnsafe
+                    logTrace pm (ShouldCallBListener True) (one (block, undo)) (Just pModifier)
                 applyAMAP e (OldestFirst xs) (NewestFirst $ (block, undo) : getNewestFirst blunds) False
             Right _ -> error "verifyAndApplyBlocksInternal: applyAMAP: \
                              \verification of one block produced more than one undo"
@@ -194,7 +195,7 @@ verifyAndApplyBlocks logTrace0 pm rollback blocks = runExceptT $ do
         -> ExceptT ApplyBlocksException m (HeaderHash, NewestFirst [] Blund)
     failWithRollback e toRollback = do
         lift $ logDebug' "verifyAndapply failed, rolling back"
-        lift $ mapM_ (rollbackBlocks pm) toRollback
+        lift $ mapM_ (rollbackBlocks logTrace pm) toRollback
         throwError e
     -- This function tries to apply a new portion of blocks (prefix
     -- and suffix). It also has an aggregating parameter @blunds@ which is
@@ -228,7 +229,8 @@ verifyAndApplyBlocks logTrace0 pm rollback blocks = runExceptT $ do
                                               getOldestFirst undos
                 let blunds' = toNewestFirst newBlunds : blunds
                 lift $ logDebug' "Rolling: Verification done, applying unsafe block"
-                lift $ applyBlocksUnsafe pm (ShouldCallBListener True) newBlunds (Just pModifier)
+                lift $ applyBlocksUnsafe
+                    logTrace pm (ShouldCallBListener True) newBlunds (Just pModifier)
                 case getOldestFirst suffix of
                     [] -> (,concatNE blunds') <$> lift GS.getTip
                     (genesis:xs) -> do
@@ -261,7 +263,7 @@ applyBlocks logTrace pm calculateLrc pModifier blunds = do
         -- caller most definitely should have computed lrc to verify
         -- the sequence beforehand.
         lrcSingleShot logTrace pm (prefixHead ^. epochIndexL)
-    applyBlocksUnsafe pm (ShouldCallBListener True) prefix pModifier
+    applyBlocksUnsafe logTrace pm (ShouldCallBListener True) prefix pModifier
     case getOldestFirst suffix of
         []           -> pass
         (genesis:xs) -> applyBlocks logTrace pm calculateLrc pModifier (OldestFirst (genesis:|xs))
@@ -278,13 +280,17 @@ applyBlocks logTrace pm calculateLrc pModifier blunds = do
 
 -- | Rollbacks blocks. Head must be the current tip.
 rollbackBlocks
-    :: (MonadBlockApply ctx m) => ProtocolMagic -> NewestFirst NE Blund -> m ()
-rollbackBlocks pm blunds = do
+    :: MonadBlockApply ctx m
+    => TraceNamed m
+    -> ProtocolMagic
+    -> NewestFirst NE Blund
+    -> m ()
+rollbackBlocks logTrace pm blunds = do
     tip <- GS.getTip
     let firstToRollback = blunds ^. _Wrapped . _neHead . _1 . headerHashG
     when (tip /= firstToRollback) $
         throwM $ RollbackTipMismatch tip firstToRollback
-    rollbackBlocksUnsafe pm (BypassSecurityCheck False) (ShouldCallBListener True) blunds
+    rollbackBlocksUnsafe logTrace pm (BypassSecurityCheck False) (ShouldCallBListener True) blunds
 
 -- | Rollbacks some blocks and then applies some blocks.
 applyWithRollback
@@ -304,6 +310,7 @@ applyWithRollback logTrace pm toRollback toApply = runExceptT $ do
         throwError $ ApplyBlocksTipMismatch "applyWithRollback/rollback" tip newestToRollback
 
     let doRollback = rollbackBlocksUnsafe
+            logTrace
             pm
             (BypassSecurityCheck False)
             (ShouldCallBListener True)

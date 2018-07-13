@@ -57,8 +57,8 @@ import qualified Pos.Txp.DB.Stakes as GS (stakeSource)
 import           Pos.Update.DB (getCompetingBVStates)
 import           Pos.Update.Poll.Types (BlockVersionState (..))
 import           Pos.Util (maybeThrow)
---import           Pos.Util.Trace (noTrace)
-import           Pos.Util.Trace.Named (TraceNamed, logDebug, logInfo, logWarning)
+import           Pos.Util.Trace.Named (TraceNamed, logDebug, logInfo,
+                     logWarning)
 import           Pos.Util.Util (HasLens (..))
 import qualified System.Metrics.Counter as Metrics
 import           UnliftIO (MonadUnliftIO)
@@ -189,7 +189,7 @@ lrcDo logTrace pm epoch consumers = do
         then coerce (nonEmpty @a) l
         else Nothing
 
-    applyBack blunds = applyBlocksUnsafe pm scb blunds Nothing
+    applyBack blunds = applyBlocksUnsafe logTrace pm scb blunds Nothing
     upToGenesis b = b ^. epochIndexL >= epoch
     whileAfterCrucial b = getEpochOrSlot b > crucial
     crucial = EpochOrSlot $ Right $ crucialSlot epoch
@@ -204,7 +204,7 @@ lrcDo logTrace pm epoch consumers = do
         -- and outer viewers mustn't know about it.
         ShouldCallBListener False
     withBlocksRolledBack blunds =
-        bracket_ (rollbackBlocksUnsafe pm bsc scb blunds)
+        bracket_ (rollbackBlocksUnsafe logTrace pm bsc scb blunds)
                  (applyBack (toOldestFirst blunds))
 
 issuersComputationDo

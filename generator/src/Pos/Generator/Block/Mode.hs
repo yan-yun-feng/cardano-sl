@@ -333,8 +333,8 @@ instance MonadBlockGenBase m => DB.MonadGState (BlockGenMode ext m) where
     gsAdoptedBVData = gsAdoptedBVDataDefault
 
 instance MonadBListener m => MonadBListener (BlockGenMode ext m) where
-    onApplyBlocks = lift . onApplyBlocks
-    onRollbackBlocks = lift . onRollbackBlocks
+    onApplyBlocks logTrace blunds = {-lift $-} onApplyBlocks logTrace blunds
+    onRollbackBlocks logTrace blunds = {-lift $-} onRollbackBlocks logTrace blunds
 
 
 instance Monad m => MonadAddresses (BlockGenMode ext m) where
