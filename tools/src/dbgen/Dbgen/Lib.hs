@@ -2,12 +2,15 @@
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
+{-# LANGUAGE NoImplicitPrelude   #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE ViewPatterns        #-}
 
-module Lib where
+module Dbgen.Lib where
 
 import           Universum
 
@@ -49,9 +52,9 @@ import           Test.QuickCheck (Gen, arbitrary, choose, frequency, generate,
                      vectorOf)
 import           Text.Printf (printf)
 
-import           CLI (CLI (..))
-import           Rendering (green, renderAccountId, say)
-import           Types (UberMonad)
+import           Dbgen.CLI (CLI (..))
+import           Dbgen.Rendering (green, renderAccountId, say)
+import           Dbgen.Types (UberMonad)
 
 import           Test.Pos.Core.Arbitrary.Txp ()
 
